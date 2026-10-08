@@ -175,13 +175,31 @@ colors \<- color_palette(num_colors)
 
 world \<- st_as_sf(maps::map("world", fill = TRUE, plot = FALSE))
 
-#Left joining the world dataset with our.
+```r
+# --- Clean country names so they match the map's names ---
+data$map_name <- trimws(sub("\\([^()]*\\)$", "", data$Location))   # drop "(UK)", "(US)" etc.
+fix <- c("United States" = "USA", "United Kingdom" = "UK",
+         "Republic of the Congo" = "Republic of Congo", "East Timor" = "Timor-Leste",
+         "Eswatini" = "Swaziland", "Vatican City" = "Vatican", "Curasao" = "Curacao",
+         "U.S. Virgin Islands" = "Virgin Islands, US",
+         "British Virgin Islands" = "Virgin Islands, British",
+         "Cocos (Keeling) Islands" = "Cocos Islands")
+data$map_name <- ifelse(data$map_name %in% names(fix), fix[data$map_name], data$map_name)
+# Some countries are split into separate islands on the map
+split <- data.frame(
+  ID = c("Trinidad", "Tobago", "Antigua", "Barbuda", "Saint Kitts", "Nevis",
+         "Saint Vincent", "Grenadines", "Saint Helena", "Ascension Island"),
+  map_name = rep(c("Trinidad and Tobago", "Antigua and Barbuda", "Saint Kitts and Nevis",
+                   "Saint Vincent and the Grenadines",
+                   "Saint Helena, Ascension and Tristan da Cunha"), each = 2))
 
-world_data \<- world %\>%
-
-  left_join(data, by = c("ID" = "Location")) %\>%
-
-  mutate(color = colors\[as.numeric(cut(Population, breaks = bins, include.lowest = TRUE))\])
+# Joining the map shapes to the population data using the cleaned names
+world_data <- world %>%
+  left_join(split, by = "ID") %>%
+  mutate(map_name = coalesce(map_name, ID)) %>%
+  left_join(data, by = "map_name") %>%
+  mutate(color = colors[as.numeric(cut(Population, breaks = bins, include.lowest = TRUE))])
+```
 
 \# Visual 1
 
@@ -251,76 +269,43 @@ library(purrr)
 
 library(highcharter)
 
-data1 \<- read.csv("countries_population_continents.csv")
+```r
+data1 <- read.csv("countries_population_continents.csv") %>%
+  filter(Location != "World") %>%                      # keep countries only
+  mutate(Continent = ifelse(Continent == "Australia", "Oceania", Continent))
 
-\# Group the data by continent and summarize the total population for each continent
+# Total population for each continent, largest first
+by_continent <- data1 %>%
+  group_by(Continent) %>%
+  summarise(Population = sum(Population, na.rm = TRUE), .groups = 'drop') %>%
+  arrange(desc(Population))
 
-by_continent \<- data1 %\>%
+# Drilldown data for every continent: its countries, largest first
+drilldown_series <- data1 %>%
+  group_by(Continent) %>%
+  group_split() %>%
+  map(function(df) list(
+    id = df$Continent[1],
+    name = df$Continent[1],
+    data = df %>%
+      arrange(desc(Population)) %>%
+      transmute(name = Location, y = Population) %>%
+      list_parse()
+  ))
 
-  group_by(Continent) %\>%
-
-  summarise(Population = sum(Population, na.rm = TRUE), .groups = 'drop')
-
-#Prepare drilldown data for Africa
-
-drilldown_chart_data \<- data1 %\>%
-
-  filter(Continent == "Africa") %\>%
-
-  select(Location, Population) %\>%
-
-  mutate(
-
-    name = Location,
-
-    y = Population
-
-  ) %\>%
-
-  select(name, y) %\>%
-
-  list_parse() 
-
-\# Create the main Highcharts visualization
-
-highchart() %\>%
-
-  hc_chart(type = "column") %\>%
-
-  hc_title(text = "Population Drilldown by Continent and Country") %\>%
-
-  hc_subtitle(text = "Click a continent to see the countries") %\>%
-
-  hc_xAxis(type = "category") %\>%
-
-  hc_yAxis(title = list(text = "Population")) %\>%
-
-  \# Add the main series for continents
-
-  hc_add_series(
-
-    name = "Total Population",
-
-    data = by_continent %\>%
-
-      mutate(drilldown = Continent) %\>%
-
-      select(name = Continent, y = Population, drilldown)
-
-  ) %\>%
-
-  \# the drilldown feature for Africa
-
-  hc_drilldown(series = list(
-
-    list(
-
-      id = "Africa",
-
-      name = "Countries",
-
-      data = drilldown_chart_data
-
-    )
-
-  ))
+highchart() %>%
+  hc_chart(type = "column") %>%
+  hc_title(text = "Population Drilldown by Continent and Country") %>%
+  hc_subtitle(text = "Click a continent to see its countries") %>%
+  hc_xAxis(type = "category") %>%
+  hc_yAxis(title = list(text = "Population")) %>%
+  hc_tooltip(pointFormat = "<b>{point.y:,.0f}</b> people") %>%
+  hc_legend(enabled = FALSE) %>%
+  hc_add_series(
+    name = "Total Population",
+    colorByPoint = TRUE,
+    data = by_continent %>%
+      transmute(name = Continent, y = Population, drilldown = Continent)
+  ) %>%
+  hc_drilldown(series = drilldown_series)
+```

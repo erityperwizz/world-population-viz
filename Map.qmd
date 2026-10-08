@@ -12,7 +12,7 @@ The graph shows a list of countries and dependencies by population in 2018. This
 
 While the graph title says that the data is from 2018, there is updated data available in a table format on the same page.
 
-Each square in the graph represents 5000,000 people. The graph shows each country's population and percentage of the world along with a few states and cities. This map has also calculated the continent-wise population. The sizes are different than that of a regular map, it allows for easy comparison of population sizes around the world. You can quickly see how the population of **India** compares with, for example, **Nigeria** or **Brazil**, as the size of the country on the map is proportional to its population. This approach utilizes the available space well by resizing countries according to their population rather than land area. This way, smaller countries with large populations (e.g., Bangladesh, Japan) are still emphasized rather than getting lost in a traditional map.
+Each square in the graph represents 500,000 people. The graph shows each country's population and percentage of the world along with a few states and cities. This map has also calculated the continent-wise population. The sizes are different than that of a regular map, it allows for easy comparison of population sizes around the world. You can quickly see how the population of **India** compares with, for example, **Nigeria** or **Brazil**, as the size of the country on the map is proportional to its population. This approach utilizes the available space well by resizing countries according to their population rather than land area. This way, smaller countries with large populations (e.g., Bangladesh, Japan) are still emphasized rather than getting lost in a traditional map.
 
 #### Flaws :
 
@@ -43,6 +43,23 @@ data <- read_csv("countries_population.csv",show_col_types = FALSE)
 
 #Cleaning the CSV file
 data$Location <- gsub("_", " ", data$Location)
+
+# --- Clean country names so they match the map's names ---
+data$map_name <- trimws(sub("\\([^()]*\\)$", "", data$Location))   # drop "(UK)", "(US)" etc.
+fix <- c("United States" = "USA", "United Kingdom" = "UK",
+         "Republic of the Congo" = "Republic of Congo", "East Timor" = "Timor-Leste",
+         "Eswatini" = "Swaziland", "Vatican City" = "Vatican", "Curasao" = "Curacao",
+         "U.S. Virgin Islands" = "Virgin Islands, US",
+         "British Virgin Islands" = "Virgin Islands, British",
+         "Cocos (Keeling) Islands" = "Cocos Islands")
+data$map_name <- ifelse(data$map_name %in% names(fix), fix[data$map_name], data$map_name)
+# Some countries are split into separate islands on the map
+split <- data.frame(
+  ID = c("Trinidad", "Tobago", "Antigua", "Barbuda", "Saint Kitts", "Nevis",
+         "Saint Vincent", "Grenadines", "Saint Helena", "Ascension Island"),
+  map_name = rep(c("Trinidad and Tobago", "Antigua and Barbuda", "Saint Kitts and Nevis",
+                   "Saint Vincent and the Grenadines",
+                   "Saint Helena, Ascension and Tristan da Cunha"), each = 2))
 
 #Creating the intervals
 bins <- c(0, 100000, 200000, 300000, 500000,
@@ -85,9 +102,11 @@ colors <- color_palette(num_colors)
 #Importing the world dataset
 world <- st_as_sf(maps::map("world", fill = TRUE, plot = FALSE))
 
-#Left joining the world dataset with our.
+#Joining the map shapes to the population data using the cleaned names
 world_data <- world %>%
-  left_join(data, by = c("ID" = "Location")) %>%
+  left_join(split, by = "ID") %>%
+  mutate(map_name = coalesce(map_name, ID)) %>%
+  left_join(data, by = "map_name") %>%
   mutate(color = colors[as.numeric(cut(Population, breaks = bins, include.lowest = TRUE))])
 
 
@@ -147,8 +166,8 @@ One piece of information that this redesign does not have is the population of c
 This graph starts out with a bar graph of the total population of each continent.
 
 1.  It gives us the data we were missing out on by doing just maps.
-2.  This is also an interactieve graph, when you click on the desired continent the graph changes and shows the population of all the countries that come under that continent.
-3.  The bar graph is arranged in descending order.
+2.  This is also an interactive graph: click any continent and the chart drills down to show the population of every country in that continent.
+3.  Both levels are arranged in descending order.
 4.  The bar graph type visualization make it very easy to notice which continent has the most population , which countries are more populated ect with just a look at the visualization.
 
 ```{r,message=FALSE, warning=FALSE}
@@ -157,46 +176,44 @@ library(dplyr)
 library(purrr)
 library(highcharter)
 
-data1 <- read.csv("countries_population_continents.csv")
+data1 <- read.csv("countries_population_continents.csv") %>%
+  filter(Location != "World") %>%                      # keep countries only
+  mutate(Continent = ifelse(Continent == "Australia", "Oceania", Continent))
 
-# Group the data by continent and summarize the total population for each continent
+# Total population for each continent, largest first
 by_continent <- data1 %>%
   group_by(Continent) %>%
-  summarise(Population = sum(Population, na.rm = TRUE), .groups = 'drop')
+  summarise(Population = sum(Population, na.rm = TRUE), .groups = 'drop') %>%
+  arrange(desc(Population))
 
-#Prepare drilldown data for Africa
-drilldown_chart_data <- data1 %>%
-  filter(Continent == "Africa") %>%
-  select(Location, Population) %>% 
-  mutate(
-    name = Location,
-    y = Population
-  ) %>%
-  select(name, y) %>%
-  list_parse()  
+# Drilldown data for every continent: its countries, largest first
+drilldown_series <- data1 %>%
+  group_by(Continent) %>%
+  group_split() %>%
+  map(function(df) list(
+    id = df$Continent[1],
+    name = df$Continent[1],
+    data = df %>%
+      arrange(desc(Population)) %>%
+      transmute(name = Location, y = Population) %>%
+      list_parse()
+  ))
 
-# Create the main Highcharts visualization
 highchart() %>%
   hc_chart(type = "column") %>%
   hc_title(text = "Population Drilldown by Continent and Country") %>%
-  hc_subtitle(text = "Click a continent to see the countries") %>%
+  hc_subtitle(text = "Click a continent to see its countries") %>%
   hc_xAxis(type = "category") %>%
   hc_yAxis(title = list(text = "Population")) %>%
-  # Add the main series for continents
+  hc_tooltip(pointFormat = "<b>{point.y:,.0f}</b> people") %>%
+  hc_legend(enabled = FALSE) %>%
   hc_add_series(
-    name = "Total Population", 
+    name = "Total Population",
+    colorByPoint = TRUE,
     data = by_continent %>%
-      mutate(drilldown = Continent) %>%
-      select(name = Continent, y = Population, drilldown)
+      transmute(name = Continent, y = Population, drilldown = Continent)
   ) %>%
-  # the drilldown feature for Africa
-  hc_drilldown(series = list(
-    list(
-      id = "Africa",
-      name = "Countries",
-      data = drilldown_chart_data
-    )
-  ))
+  hc_drilldown(series = drilldown_series)
 
 ```
 

@@ -1,9 +1,9 @@
 ---
-title: "STAT Project"
+title: "Reimagining Data Visualizations"
 author: "Jeevani and Erica"
 ---
 
-# **Welcome to Our Data Redesigning Project**
+# **Reimagining Data Visualizations in R**
 
 This website presents the redesign of data visualizations aimed at improving clarity, insight and interactivity. Created by Jeevani Bhaskar and Erica Mathias, this website showcases a range of visualizations using R.
 
