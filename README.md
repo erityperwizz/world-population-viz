@@ -2,6 +2,8 @@
 
 An interactive Quarto website that takes a static world population chart and rebuilds it into clearer, explorable visualizations in R.
 
+**Live site:** https://erityperwizz.github.io/world-population-viz/
+
 **Authors:** Erica Mathias and Jeevani Bhaskar
 
 ## What's inside
@@ -29,4 +31,4 @@ R, Quarto, Leaflet, Highcharter, ggplot2, dplyr, purrr, sf, RColorBrewer
 install.packages(c("leaflet", "highcharter", "ggplot2", "dplyr", "purrr", "readr", "sf", "RColorBrewer", "htmltools"))
 ```
 
-Then from the project folder run `quarto render`. The site is built into `_site/`.
+Then from the project folder run `quarto render`. The site is built into `docs/`, which GitHub Pages serves.
